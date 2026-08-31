@@ -12,6 +12,8 @@ int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   QApplication app(argc, argv);
+  QApplication::setOrganizationName("robot_bag_play_tool");
+  QApplication::setApplicationName("robot_bag_play_tool");
 
   qRegisterMetaType<uint64_t>("uint64_t");
   qRegisterMetaType<int64_t>("int64_t");

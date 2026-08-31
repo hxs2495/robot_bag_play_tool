@@ -17,6 +17,11 @@
 #include "robot_bag_play_tool/message_parser.hpp"
 #include "robot_bag_play_tool/timeline_widget.hpp"
 
+class QCloseEvent;
+class QComboBox;
+class QSplitter;
+class QTabWidget;
+
 namespace robot_bag_play_tool
 {
 
@@ -27,6 +32,9 @@ class MainWindow : public QMainWindow
 public:
   explicit MainWindow(std::shared_ptr<BagPlayer> bag_player, QWidget * parent = nullptr);
   ~MainWindow() override = default;
+
+protected:
+  void closeEvent(QCloseEvent * event) override;
 
 private slots:
   void openBag();
@@ -49,6 +57,8 @@ private slots:
 
 private:
   void buildUi();
+  void restoreUiState();
+  void saveUiState() const;
   void populateTree(const ParsedMessageNode & node);
   void addTreeNode(QStandardItem * parent, const ParsedMessageNode & node);
   QString formatTime(int64_t timestamp_ns) const;
@@ -69,6 +79,9 @@ private:
   QLabel * current_message_label_ = nullptr;
   QProgressBar * progress_bar_ = nullptr;
   QStandardItemModel * tree_model_ = nullptr;
+  QComboBox * speed_box_ = nullptr;
+  QSplitter * content_splitter_ = nullptr;
+  QTabWidget * message_tabs_ = nullptr;
   std::unordered_map<std::string, int> topic_rows_;
 };
 

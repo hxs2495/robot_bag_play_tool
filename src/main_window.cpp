@@ -4,6 +4,7 @@
 
 #include <QAction>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QColor>
 #include <QComboBox>
 #include <QFileDialog>
@@ -16,6 +17,8 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QSettings>
+#include <QSignalBlocker>
 #include <QSplitter>
 #include <QStringList>
 #include <QTabWidget>
@@ -37,6 +40,9 @@ enum TopicColumns
   kActionColumn,
   kColumnCount
 };
+
+constexpr char kUiSettingsGroup[] = "main_window";
+constexpr int kWindowStateVersion = 1;
 
 QPushButton * makeButton(const QString & text, QWidget * parent, const char * variant = "secondary")
 {
@@ -267,6 +273,7 @@ MainWindow::MainWindow(std::shared_ptr<BagPlayer> bag_player, QWidget * parent)
   connect(bag_player_.get(), &BagPlayer::bagClockChanged, this, &MainWindow::updateClock);
   connect(bag_player_.get(), &BagPlayer::playbackProgress, this, &MainWindow::updateProgress);
   connect(bag_player_.get(), &BagPlayer::bagClosed, this, &MainWindow::resetUi);
+  restoreUiState();
 }
 
 void MainWindow::buildUi()
@@ -319,10 +326,10 @@ void MainWindow::buildUi()
   auto * zoom_in_button = makeButton("放大", top_panel);
   auto * zoom_out_button = makeButton("缩小", top_panel);
   auto * fit_button = makeButton("适配", top_panel);
-  auto * speed_box = new QComboBox(top_panel);
-  speed_box->addItems({"0.1x", "0.25x", "0.5x", "1x", "1.5x", "2x", "5x", "10x"});
-  speed_box->setCurrentText("1x");
-  speed_box->setMinimumWidth(96);
+  speed_box_ = new QComboBox(top_panel);
+  speed_box_->addItems({"0.1x", "0.25x", "0.5x", "1x", "1.5x", "2x", "5x", "10x"});
+  speed_box_->setCurrentText("1x");
+  speed_box_->setMinimumWidth(96);
   toolbar->addLayout(title_stack);
   toolbar->addStretch();
   toolbar->addWidget(open_button);
@@ -335,7 +342,7 @@ void MainWindow::buildUi()
   toolbar->addWidget(fit_button);
   toolbar->addSpacing(8);
   toolbar->addWidget(makeCaption("速度", top_panel));
-  toolbar->addWidget(speed_box);
+  toolbar->addWidget(speed_box_);
 
   bag_path_label_ = new QLabel("Bag：未加载", top_panel);
   bag_info_label_ = new QLabel("话题：0 | 消息：0 | 时间范围：-", top_panel);
@@ -409,9 +416,9 @@ void MainWindow::buildUi()
   current_message_label_ = new QLabel("当前消息：-", central);
   setMetric(current_message_label_);
 
-  auto * message_tabs = new QTabWidget(central);
-  message_tabs->addTab(tree_view_, "结构视图");
-  message_tabs->addTab(raw_view_, "原始视图");
+  message_tabs_ = new QTabWidget(central);
+  message_tabs_->addTab(tree_view_, "结构视图");
+  message_tabs_->addTab(raw_view_, "原始视图");
 
   auto * message_panel = makePanel(central);
   auto * message_layout = new QVBoxLayout(message_panel);
@@ -419,17 +426,17 @@ void MainWindow::buildUi()
   message_layout->setSpacing(10);
   message_layout->addWidget(makeCaption("消息查看器", message_panel));
   message_layout->addWidget(current_message_label_);
-  message_layout->addWidget(message_tabs);
+  message_layout->addWidget(message_tabs_);
 
-  auto * splitter = new QSplitter(Qt::Horizontal, central);
-  splitter->addWidget(topic_panel);
-  splitter->addWidget(message_panel);
-  splitter->setStretchFactor(0, 3);
-  splitter->setStretchFactor(1, 2);
+  content_splitter_ = new QSplitter(Qt::Horizontal, central);
+  content_splitter_->addWidget(timeline_panel);
+  content_splitter_->addWidget(message_panel);
+  content_splitter_->setStretchFactor(0, 3);
+  content_splitter_->setStretchFactor(1, 2);
 
   root_layout->addWidget(top_panel);
-  root_layout->addWidget(timeline_panel);
-  root_layout->addWidget(splitter);
+  root_layout->addWidget(topic_panel);
+  root_layout->addWidget(content_splitter_);
   setCentralWidget(central);
 
   connect(open_button, &QPushButton::clicked, this, &MainWindow::openBag);
@@ -441,7 +448,7 @@ void MainWindow::buildUi()
   connect(zoom_out_button, &QPushButton::clicked, timeline_widget_, &TimelineWidget::zoomOut);
   connect(fit_button, &QPushButton::clicked, timeline_widget_, &TimelineWidget::fit);
   connect(timeline_widget_, &TimelineWidget::seekRequested, this, &MainWindow::seekTo);
-  connect(speed_box, &QComboBox::currentTextChanged, this, [this](const QString & text) {
+  connect(speed_box_, &QComboBox::currentTextChanged, this, [this](const QString & text) {
     QString value = text;
     value.chop(1);
     bag_player_->setPlaybackRate(value.toDouble());
@@ -456,6 +463,64 @@ void MainWindow::buildUi()
   connect(zoom_in_action, &QAction::triggered, timeline_widget_, &TimelineWidget::zoomIn);
   connect(zoom_out_action, &QAction::triggered, timeline_widget_, &TimelineWidget::zoomOut);
   connect(fit_action, &QAction::triggered, timeline_widget_, &TimelineWidget::fit);
+}
+
+void MainWindow::closeEvent(QCloseEvent * event)
+{
+  saveUiState();
+  QMainWindow::closeEvent(event);
+}
+
+void MainWindow::restoreUiState()
+{
+  QSettings settings;
+  settings.beginGroup(kUiSettingsGroup);
+
+  const QByteArray geometry = settings.value("geometry").toByteArray();
+  if (!geometry.isEmpty()) {
+    restoreGeometry(geometry);
+  }
+
+  const QByteArray window_state = settings.value("window_state").toByteArray();
+  if (!window_state.isEmpty()) {
+    restoreState(window_state, kWindowStateVersion);
+  }
+
+  const QByteArray splitter_state = settings.value("content_splitter").toByteArray();
+  if (!splitter_state.isEmpty()) {
+    content_splitter_->restoreState(splitter_state);
+  }
+
+  const int tab_index = settings.value("message_tab", 0).toInt();
+  if (tab_index >= 0 && tab_index < message_tabs_->count()) {
+    message_tabs_->setCurrentIndex(tab_index);
+  }
+
+  const QString speed = settings.value("playback_speed", "1x").toString();
+  const int speed_index = speed_box_->findText(speed);
+  if (speed_index >= 0) {
+    const QSignalBlocker blocker(speed_box_);
+    speed_box_->setCurrentIndex(speed_index);
+
+    QString rate = speed;
+    rate.chop(1);
+    bag_player_->setPlaybackRate(rate.toDouble());
+  }
+
+  settings.endGroup();
+}
+
+void MainWindow::saveUiState() const
+{
+  QSettings settings;
+  settings.beginGroup(kUiSettingsGroup);
+  settings.setValue("geometry", saveGeometry());
+  settings.setValue("window_state", saveState(kWindowStateVersion));
+  settings.setValue("content_splitter", content_splitter_->saveState());
+  settings.setValue("message_tab", message_tabs_->currentIndex());
+  settings.setValue("playback_speed", speed_box_->currentText());
+  settings.endGroup();
+  settings.sync();
 }
 
 void MainWindow::openBag()
