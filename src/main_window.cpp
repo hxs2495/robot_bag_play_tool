@@ -9,7 +9,6 @@
 #include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFontDatabase>
 #include <QFrame>
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -21,7 +20,6 @@
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStringList>
-#include <QTabWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -191,7 +189,7 @@ void applyModernStyle(QWidget * widget)
       border-radius: 4px;
     }
 
-    QTableWidget, QTreeView, QPlainTextEdit {
+    QTableWidget, QTreeView {
       background: #ffffff;
       border: 1px solid #e1e7f0;
       border-radius: 7px;
@@ -269,7 +267,6 @@ MainWindow::MainWindow(std::shared_ptr<BagPlayer> bag_player, QWidget * parent)
   buildUi();
   connect(bag_player_.get(), &BagPlayer::bagLoaded, this, &MainWindow::refreshTopics);
   connect(bag_player_.get(), &BagPlayer::topicStatusChanged, this, &MainWindow::updateTopicStatus);
-  connect(bag_player_.get(), &BagPlayer::topicMessage, this, &MainWindow::showTopicMessage);
   connect(bag_player_.get(), &BagPlayer::bagClockChanged, this, &MainWindow::updateClock);
   connect(bag_player_.get(), &BagPlayer::playbackProgress, this, &MainWindow::updateProgress);
   connect(bag_player_.get(), &BagPlayer::bagClosed, this, &MainWindow::resetUi);
@@ -394,6 +391,7 @@ void MainWindow::buildUi()
   topic_table_->horizontalHeader()->setSectionResizeMode(kActionColumn, QHeaderView::ResizeToContents);
   topic_table_->verticalHeader()->setVisible(false);
   topic_table_->setSelectionBehavior(QAbstractItemView::SelectRows);
+  topic_table_->setSelectionMode(QAbstractItemView::SingleSelection);
   topic_table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
   topic_table_->setAlternatingRowColors(true);
   topic_table_->setShowGrid(false);
@@ -402,35 +400,27 @@ void MainWindow::buildUi()
   topic_layout->addWidget(topic_table_);
 
   tree_model_ = new QStandardItemModel(this);
-  tree_model_->setHorizontalHeaderLabels({"字段", "类型", "值"});
+  tree_model_->setHorizontalHeaderLabels({"字段", "消息类型", "约束 / 说明"});
   tree_view_ = new QTreeView(central);
   tree_view_->setModel(tree_model_);
   tree_view_->setUniformRowHeights(true);
   tree_view_->setAlternatingRowColors(true);
   tree_view_->setHeaderHidden(false);
 
-  raw_view_ = new QPlainTextEdit(central);
-  raw_view_->setReadOnly(true);
-  raw_view_->setLineWrapMode(QPlainTextEdit::NoWrap);
-  raw_view_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-  current_message_label_ = new QLabel("当前消息：-", central);
-  setMetric(current_message_label_);
+  selected_topic_label_ = new QLabel("请选择话题列表中的话题以查看消息类型结构", central);
+  setMetric(selected_topic_label_);
 
-  message_tabs_ = new QTabWidget(central);
-  message_tabs_->addTab(tree_view_, "结构视图");
-  message_tabs_->addTab(raw_view_, "原始视图");
-
-  auto * message_panel = makePanel(central);
-  auto * message_layout = new QVBoxLayout(message_panel);
-  message_layout->setContentsMargins(14, 14, 14, 14);
-  message_layout->setSpacing(10);
-  message_layout->addWidget(makeCaption("消息查看器", message_panel));
-  message_layout->addWidget(current_message_label_);
-  message_layout->addWidget(message_tabs_);
+  auto * type_panel = makePanel(central);
+  auto * type_layout = new QVBoxLayout(type_panel);
+  type_layout->setContentsMargins(14, 14, 14, 14);
+  type_layout->setSpacing(10);
+  type_layout->addWidget(makeCaption("话题消息类型结构（点击话题后加载）", type_panel));
+  type_layout->addWidget(selected_topic_label_);
+  type_layout->addWidget(tree_view_);
 
   content_splitter_ = new QSplitter(Qt::Horizontal, central);
   content_splitter_->addWidget(timeline_panel);
-  content_splitter_->addWidget(message_panel);
+  content_splitter_->addWidget(type_panel);
   content_splitter_->setStretchFactor(0, 3);
   content_splitter_->setStretchFactor(1, 2);
 
@@ -448,6 +438,7 @@ void MainWindow::buildUi()
   connect(zoom_out_button, &QPushButton::clicked, timeline_widget_, &TimelineWidget::zoomOut);
   connect(fit_button, &QPushButton::clicked, timeline_widget_, &TimelineWidget::fit);
   connect(timeline_widget_, &TimelineWidget::seekRequested, this, &MainWindow::seekTo);
+  connect(topic_table_, &QTableWidget::cellClicked, this, &MainWindow::showTopicType);
   connect(speed_box_, &QComboBox::currentTextChanged, this, [this](const QString & text) {
     QString value = text;
     value.chop(1);
@@ -491,11 +482,6 @@ void MainWindow::restoreUiState()
     content_splitter_->restoreState(splitter_state);
   }
 
-  const int tab_index = settings.value("message_tab", 0).toInt();
-  if (tab_index >= 0 && tab_index < message_tabs_->count()) {
-    message_tabs_->setCurrentIndex(tab_index);
-  }
-
   const QString speed = settings.value("playback_speed", "1x").toString();
   const int speed_index = speed_box_->findText(speed);
   if (speed_index >= 0) {
@@ -517,7 +503,6 @@ void MainWindow::saveUiState() const
   settings.setValue("geometry", saveGeometry());
   settings.setValue("window_state", saveState(kWindowStateVersion));
   settings.setValue("content_splitter", content_splitter_->saveState());
-  settings.setValue("message_tab", message_tabs_->currentIndex());
   settings.setValue("playback_speed", speed_box_->currentText());
   settings.endGroup();
   settings.sync();
@@ -550,6 +535,8 @@ void MainWindow::refreshTopics()
   timeline_widget_->setTimeRange(bag_player_->startTimeNs(), bag_player_->endTimeNs());
   timeline_widget_->setTopics(topics);
   timeline_widget_->setCurrentTime(bag_player_->startTimeNs());
+  tree_model_->removeRows(0, tree_model_->rowCount());
+  selected_topic_label_->setText("请选择话题列表中的话题以查看消息类型结构");
 
   for (int row = 0; row < static_cast<int>(topics.size()); ++row) {
     const auto & topic = topics[row];
@@ -635,8 +622,7 @@ void MainWindow::resetUi()
   timeline_widget_->setTimeRange(0, 1);
   timeline_widget_->setCurrentTime(0);
   tree_model_->removeRows(0, tree_model_->rowCount());
-  raw_view_->clear();
-  current_message_label_->setText("当前消息：-");
+  selected_topic_label_->setText("请选择话题列表中的话题以查看消息类型结构");
   bag_path_label_->setText("Bag：未加载");
   bag_info_label_->setText("话题：0 | 消息：0 | 时间范围：-");
   clock_label_->setText("时钟：-");
@@ -678,25 +664,27 @@ void MainWindow::updateTopicStatus(
   status_label_->setText(QString("状态：%1 %2").arg(topic_name, status));
 }
 
-void MainWindow::showTopicMessage(
-  const QString & topic_name,
-  const QString & topic_type,
-  int64_t timestamp_ns,
-  const QByteArray & serialized_data)
+void MainWindow::showTopicType(int row, int column)
 {
-  current_message_label_->setText(QString("当前消息：%1 | %2 | %3")
-    .arg(topic_name)
-    .arg(topic_type)
-    .arg(formatTime(timestamp_ns)));
-  raw_view_->setPlainText(parser_.rawPreview(serialized_data));
+  Q_UNUSED(column);
+  const auto * topic_item = topic_table_->item(row, kTopicColumn);
+  const auto * type_item = topic_table_->item(row, kTypeColumn);
+  if (topic_item == nullptr || type_item == nullptr) {
+    return;
+  }
+
+  const QString topic_name = topic_item->text();
+  const QString topic_type = type_item->text();
+  selected_topic_label_->setText(QString("话题：%1  |  消息类型：%2")
+    .arg(topic_name, topic_type));
 
   try {
-    populateTree(parser_.parse(topic_type.toStdString(), serialized_data));
+    populateTree(parser_.parseType(topic_type.toStdString()));
   } catch (const std::exception & ex) {
     ParsedMessageNode error;
     error.name = topic_type;
     error.type = "error";
-    error.value = QString::fromUtf8(ex.what());
+    error.value = QString("无法加载消息类型：%1").arg(QString::fromUtf8(ex.what()));
     populateTree(error);
   }
 }
@@ -743,13 +731,6 @@ void MainWindow::addTreeNode(QStandardItem * parent, const ParsedMessageNode & n
   for (const auto & child : node.children) {
     addTreeNode(item, child);
   }
-}
-
-QString MainWindow::formatTime(int64_t timestamp_ns) const
-{
-  const int64_t seconds = timestamp_ns / 1000000000LL;
-  const int64_t nanoseconds = timestamp_ns % 1000000000LL;
-  return QString("%1.%2").arg(seconds).arg(nanoseconds, 9, 10, QLatin1Char('0'));
 }
 
 QString MainWindow::formatDuration(int64_t duration_ns) const

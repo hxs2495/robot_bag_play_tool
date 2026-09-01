@@ -73,11 +73,6 @@ signals:
     const QString & status,
     uint64_t published_count,
     double frequency_hz);
-  void topicMessage(
-    const QString & topic_name,
-    const QString & topic_type,
-    int64_t timestamp_ns,
-    const QByteArray & serialized_data);
   void bagClockChanged(int64_t timestamp_ns);
   void playbackProgress(double progress);
   void bagClosed();
@@ -98,7 +93,6 @@ private:
     TopicPlaybackState state = TopicPlaybackState::Stopped;
     uint64_t published_count = 0;
     std::chrono::steady_clock::time_point last_status_emit;
-    std::chrono::steady_clock::time_point last_message_emit;
   };
 
   TopicRuntime * runtimeForLocked(const QString & topic_name);

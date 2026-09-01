@@ -6,7 +6,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <QByteArray>
 #include <QString>
 
 #include "rcpputils/shared_library.hpp"
@@ -26,8 +25,7 @@ struct ParsedMessageNode
 class MessageParser
 {
 public:
-  ParsedMessageNode parse(const std::string & topic_type, const QByteArray & serialized_data);
-  QString rawPreview(const QByteArray & serialized_data) const;
+  ParsedMessageNode parseType(const std::string & topic_type);
 
 private:
   struct TypeSupportEntry
@@ -37,17 +35,12 @@ private:
   };
 
   const rosidl_message_type_support_t * getTypeSupport(const std::string & topic_type);
-  ParsedMessageNode parseMessage(
-    const void * message,
+  ParsedMessageNode parseMessageType(
     const rosidl_message_type_support_t * type_support,
     const QString & name,
     int depth) const;
-  ParsedMessageNode parseField(
-    const void * field,
-    const void * parent_message,
-    const void * message_member,
-    int depth) const;
-  QString scalarValue(const void * field, uint8_t type_id) const;
+  ParsedMessageNode parseFieldType(const void * message_member, int depth) const;
+  QString messageTypeName(const rosidl_message_type_support_t * type_support) const;
   QString typeName(uint8_t type_id) const;
 
   std::unordered_map<std::string, TypeSupportEntry> type_support_cache_;

@@ -6,7 +6,6 @@
 
 #include <QLabel>
 #include <QMainWindow>
-#include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QStandardItemModel>
@@ -20,7 +19,6 @@
 class QCloseEvent;
 class QComboBox;
 class QSplitter;
-class QTabWidget;
 
 namespace robot_bag_play_tool
 {
@@ -46,11 +44,7 @@ private slots:
     const QString & status,
     uint64_t published_count,
     double frequency_hz);
-  void showTopicMessage(
-    const QString & topic_name,
-    const QString & topic_type,
-    int64_t timestamp_ns,
-    const QByteArray & serialized_data);
+  void showTopicType(int row, int column);
   void updateClock(int64_t timestamp_ns);
   void updateProgress(double progress);
   void seekTo(int64_t timestamp_ns);
@@ -61,7 +55,6 @@ private:
   void saveUiState() const;
   void populateTree(const ParsedMessageNode & node);
   void addTreeNode(QStandardItem * parent, const ParsedMessageNode & node);
-  QString formatTime(int64_t timestamp_ns) const;
   QString formatDuration(int64_t duration_ns) const;
   QString formatBytes(uint64_t bytes) const;
   int rowForTopic(const QString & topic_name) const;
@@ -75,13 +68,11 @@ private:
   TimelineWidget * timeline_widget_ = nullptr;
   QTableWidget * topic_table_ = nullptr;
   QTreeView * tree_view_ = nullptr;
-  QPlainTextEdit * raw_view_ = nullptr;
-  QLabel * current_message_label_ = nullptr;
+  QLabel * selected_topic_label_ = nullptr;
   QProgressBar * progress_bar_ = nullptr;
   QStandardItemModel * tree_model_ = nullptr;
   QComboBox * speed_box_ = nullptr;
   QSplitter * content_splitter_ = nullptr;
-  QTabWidget * message_tabs_ = nullptr;
   std::unordered_map<std::string, int> topic_rows_;
 };
 

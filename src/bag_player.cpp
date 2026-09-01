@@ -7,8 +7,6 @@
 #include <limits>
 #include <utility>
 
-#include <QByteArray>
-
 #include "rclcpp/serialized_message.hpp"
 #include "rmw/rmw.h"
 #include "rosbag2_cpp/converter_options.hpp"
@@ -22,7 +20,6 @@ namespace
 {
 constexpr int64_t kNanosecondsPerSecond = 1000000000LL;
 constexpr auto kStatusInterval = std::chrono::milliseconds(250);
-constexpr auto kMessagePreviewInterval = std::chrono::milliseconds(33);
 
 int64_t toNanoseconds(const std::chrono::time_point<std::chrono::high_resolution_clock> & time)
 {
@@ -306,7 +303,6 @@ void BagPlayer::playAll()
       item.second.published_count = 0;
       item.second.state = TopicPlaybackState::Playing;
       item.second.last_status_emit = {};
-      item.second.last_message_emit = {};
       emitTopicStateLocked(item.second);
     }
   }
@@ -336,7 +332,6 @@ void BagPlayer::playChecked()
       item.second.published_count = 0;
       item.second.state = item.second.info.checked ? TopicPlaybackState::Playing : TopicPlaybackState::Stopped;
       item.second.last_status_emit = {};
-      item.second.last_message_emit = {};
       has_checked = has_checked || item.second.info.checked;
       emitTopicStateLocked(item.second);
     }
@@ -463,14 +458,9 @@ void BagPlayer::playbackLoop(int64_t start_timestamp_ns)
         snapshot.publisher->publish(serialized_message);
       }
 
-      QByteArray raw(
-        reinterpret_cast<const char *>(bag_message->serialized_data->buffer),
-        static_cast<int>(bag_message->serialized_data->buffer_length));
-
       const auto now = std::chrono::steady_clock::now();
       double frequency = 0.0;
       uint64_t count = 0;
-      bool emit_message = false;
       bool emit_status = false;
       TopicRuntime state_snapshot;
       {
@@ -491,23 +481,15 @@ void BagPlayer::playbackLoop(int64_t start_timestamp_ns)
           }
         }
 
-        emit_message = runtime.last_message_emit.time_since_epoch().count() == 0 ||
-          now - runtime.last_message_emit >= kMessagePreviewInterval;
         emit_status = runtime.last_status_emit.time_since_epoch().count() == 0 ||
           now - runtime.last_status_emit >= kStatusInterval ||
           count == runtime.info.message_count;
-        if (emit_message) {
-          runtime.last_message_emit = now;
-        }
         if (emit_status) {
           runtime.last_status_emit = now;
+          state_snapshot = runtime;
         }
-        state_snapshot = runtime;
       }
 
-      if (emit_message) {
-        emit topicMessage(state_snapshot.info.name, state_snapshot.info.type, stamp, raw);
-      }
       if (emit_status) {
         emit topicStatusChanged(state_snapshot.info.name, "播放中", count, frequency);
       }
